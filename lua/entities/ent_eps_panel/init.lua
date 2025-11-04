@@ -16,6 +16,10 @@ function ENT:Initialize()
 
     self:SetUseType(SIMPLE_USE)
     self._nextUse = 0 -- remember the last E press so we can throttle a bit
+    -- Tie this panel into the shared EPS pool as soon as it spins up.
+    if EPS and EPS.RegisterPanel then
+        EPS.RegisterPanel(self)
+    end
 end
 
 function ENT:Use(activator, caller)
@@ -36,6 +40,13 @@ function ENT:Use(activator, caller)
     end
 
     activator:EmitSound("buttons/button14.wav", 60, 100) -- little bit of feedback so folks know it worked
+end
+
+function ENT:OnRemove()
+    -- Drop our handle so stale panels don't hang onto the power tally.
+    if EPS and EPS.UnregisterPanel then
+        EPS.UnregisterPanel(self)
+    end
 end
 
 -- Let duplicator/advdupe2 snapshot this without extra wiring.
