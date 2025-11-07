@@ -16,6 +16,7 @@ function ENT:Initialize()
 
     self:SetUseType(SIMPLE_USE)
     self._nextUse = 0 -- remember the last E press so we can throttle a bit
+    self._epsDamage = nil
     -- Tie this panel into the shared EPS pool as soon as it spins up.
     if EPS and EPS.RegisterPanel then
         EPS.RegisterPanel(self)
@@ -26,6 +27,10 @@ function ENT:Use(activator, caller)
     if (self._nextUse or 0) > CurTime() then return end
     self._nextUse = CurTime() + USE_COOLDOWN
     if not IsValid(activator) or not activator:IsPlayer() then return end
+
+    if EPS and EPS.RecordPanelUse then
+        EPS.RecordPanelUse(self, activator)
+    end
 
     -- Ask the routing addon for a fresh state push. If it isn't loaded yet, no big deal.
     if EPS and EPS.BroadcastState then
@@ -59,3 +64,72 @@ duplicator.RegisterEntityClass("ent_eps_panel", function(ply, data)
     ent:Activate()
     return ent
 end, {"Pos","Angle"})
+
+function ENT:GetSparkOffset()
+    return self.SparkOffset or Vector(0, 0, 26)
+end
+
+function ENT:GetFireOffset()
+    if self.FireOffset then return self.FireOffset end
+    return self:GetSparkOffset() + Vector(0, 0, 24)
+end
+
+function ENT:SetSubsystemMask(list)
+    if not istable(list) then
+        self._epsSubsystemMask = nil
+        return
+    end
+
+    self._epsSubsystemMask = {}
+    for _, id in ipairs(list) do
+        if isstring(id) then
+            self._epsSubsystemMask[id] = true
+        end
+    end
+end
+
+function ENT:ServesSubsystem(id)
+    if not self._epsSubsystemMask then return true end
+    return self._epsSubsystemMask[id] == true
+end
+
+function ENT:TriggerOverpowerSparks()
+    if self._nextSpark and self._nextSpark > CurTime() then return end
+    self._nextSpark = CurTime() + 0.4
+
+    local effect = EffectData()
+    effect:SetOrigin(self:LocalToWorld(self:GetSparkOffset()))
+    effect:SetNormal(self:GetForward())
+    effect:SetMagnitude(2.5)
+    effect:SetScale(1.1)
+    effect:SetRadius(6)
+    util.Effect("ElectricSpark", effect, true, true)
+
+    self:EmitSound("ambient/energy/zap" .. math.random(1, 3) .. ".wav", 60, 100, 0.55)
+end
+
+function ENT:GetActiveDamageState()
+    if not self._epsDamage then return end
+    for _, state in pairs(self._epsDamage) do
+        if state and not state.repaired then
+            return state
+        end
+    end
+end
+
+function ENT:HandleSonicRepair(ply, swep, hitPos)
+    local state = self:GetActiveDamageState()
+    if not state or state.repaired then return false end
+
+    local repairTime = state.repairTime or 0
+    if repairTime <= 0 then return false end
+
+    state.progress = math.min((state.progress or 0) + FrameTime(), repairTime)
+    state.lastRepair = CurTime()
+
+    if state.progress >= repairTime and EPS and EPS._CompleteDamageRepair then
+        EPS._CompleteDamageRepair(state, ply)
+    end
+
+    return true
+end

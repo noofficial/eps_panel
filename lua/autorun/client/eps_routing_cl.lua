@@ -12,9 +12,12 @@ local cState = {
 
 local COLOR_TEXT = Color(200, 200, 200)
 local COLOR_TEXT_OVER = Color(220, 80, 60)
-local COLOR_DEMAND_WARN = Color(220, 140, 40)
 local COLOR_PANEL = Color(25, 25, 25, 220)
 local COLOR_NAME = Color(230, 230, 230)
+local COLOR_SHORT_BASE = Color(170, 160, 220)
+local COLOR_SHORT_MAX = Color(110, 20, 170)
+local COLOR_OVER_BASE = Color(240, 210, 80)
+local COLOR_OVER_MAX = Color(215, 40, 40)
 
 local function findSubById(id)
 	for index, sub in ipairs(cState.subs) do
@@ -45,17 +48,50 @@ local function calculateGlobalEstimate()
 	return (total - baseline) + calculateSum()
 end
 
+local function computeWindowTitle()
+	local title = "EPS Power Routing"
+	local parts = {}
+	if cState.deck and cState.deck ~= "" then
+		parts[#parts + 1] = "Deck " .. tostring(cState.deck)
+	end
+	if cState.section and cState.section ~= "" then
+		parts[#parts + 1] = cState.section
+	end
+	if #parts > 0 then
+		title = title .. " – " .. table.concat(parts, ", ")
+	end
+	return title
+end
+
+local function lerpColor(colA, colB, t)
+	t = math.Clamp(t or 0, 0, 1)
+	return Color(
+		math.floor(Lerp(t, colA.r, colB.r) + 0.5),
+		math.floor(Lerp(t, colA.g, colB.g) + 0.5),
+		math.floor(Lerp(t, colA.b, colB.b) + 0.5)
+	)
+end
+
 local function updateDemandRow(row, data)
 	if not row or not IsValid(row.demand) then return end
 
 	local demandValue = data.demand or 0
 	local allocValue = data.alloc or 0
-	row.demand:SetText(string.format("Demand: %d", demandValue))
-	if demandValue > allocValue then
-		row.demand:SetTextColor(COLOR_DEMAND_WARN)
-	else
-		row.demand:SetTextColor(COLOR_TEXT)
+	local extraCap = (data.sliderMax or data.max or demandValue) - demandValue
+	local delta = allocValue - demandValue
+	local color = COLOR_TEXT
+
+	if demandValue > 0 and delta < 0 then
+		local shortageRatio = math.min(math.abs(delta) / math.max(demandValue, 1), 1)
+		color = lerpColor(COLOR_SHORT_BASE, COLOR_SHORT_MAX, math.sqrt(shortageRatio))
+	elseif delta > 0 then
+		local cap = math.max(extraCap or 0, 1)
+		local overRatio = math.min(delta / cap, 1)
+		color = lerpColor(COLOR_OVER_BASE, COLOR_OVER_MAX, overRatio ^ 0.8)
 	end
+
+	row.demand:SetText(string.format("Demand: %d", demandValue))
+	row.demand:SetTextColor(color)
 end
 
 local function refreshTotals()
@@ -162,6 +198,7 @@ local function sendUpdate()
 	if count <= 0 then return end
 
 	net.Start(EPS.NET.Update)
+	net.WriteString(cState.locationKey or "")
 	net.WriteUInt(count, 8)
 
 	for i = 1, count do
@@ -182,7 +219,7 @@ local function buildUI()
 	PANEL = vgui.Create("DFrame")
 	PANEL:SetSize(w, h)
 	PANEL:Center()
-	PANEL:SetTitle("EPS Power Routing")
+	PANEL:SetTitle(computeWindowTitle())
 	PANEL:MakePopup()
 
 	function PANEL:OnRemove()
@@ -252,14 +289,23 @@ end
 
 net.Receive(EPS.NET.FullState, function()
 	local shouldOpen = net.ReadBool()
+	local locKey = net.ReadString()
+	local deckLabel = net.ReadString()
+	local sectionName = net.ReadString()
 	local maxBudget = net.ReadUInt(16)
 	local totalAlloc = net.ReadUInt(16)
 	local count = net.ReadUInt(8)
 
+	cState.locationKey = locKey ~= "" and locKey or nil
+	cState.deck = deckLabel ~= "" and deckLabel or nil
+	cState.section = sectionName ~= "" and sectionName or nil
 	cState.maxBudget = maxBudget
 	cState.totalAlloc = totalAlloc
 	cState.subs = {}
 	cState.localBaseline = 0
+	if IsValid(PANEL) then
+		PANEL:SetTitle(computeWindowTitle())
+	end
 
 	for i = 1, count do
 		cState.subs[i] = {
