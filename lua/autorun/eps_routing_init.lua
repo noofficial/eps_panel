@@ -1,9 +1,11 @@
 if SERVER then
+AddCSLuaFile("eps/core/init.lua")
 AddCSLuaFile("eps_routing/config.lua")
 AddCSLuaFile("eps_routing/sh_state.lua")
 AddCSLuaFile("autorun/client/eps_routing_cl.lua")
 end
 
+include("eps/core/init.lua")
 
 include("eps_routing/config.lua")
 include("eps_routing/sh_state.lua")

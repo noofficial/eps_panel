@@ -1,5 +1,11 @@
 EPS = EPS or {}
 EPS.Config = {
+  -- Local offset for damage sparks relative to the panel's origin. Adjust to reposition effects.
+  -- Accepts either a Vector(...) or a table { x = ?, y = ?, z = ? } / { ?, ?, ? }.
+  PanelSparkOffset = { x = 6, y = 0, z = 8 },
+  -- Fire effect offset; set to nil to fall back to spark offset + 24.
+  PanelFireOffset = { x = 6, y = 0, z = 50 },
+
   -- Full ship-wide EPS capacity. Sized just above the combined subsystem peaks so we stay flexible when things spike.
   MaxBudget = 860,
 
