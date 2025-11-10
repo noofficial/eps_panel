@@ -34,7 +34,7 @@ local function getRandomPanelInfo()
     return infos[math.random(#infos)]
 end
 
-local function triggerManualSpike(ply)
+local function triggerManualSpike(ply, options)
     if not deps.beginSpike then
         if IsValid(ply) and ply.ChatPrint then
             ply:ChatPrint("[EPS] Spike controller unavailable.")
@@ -42,10 +42,12 @@ local function triggerManualSpike(ply)
         return false
     end
 
+    options = options or {}
+
     local context, reason = deps.beginSpike(nil, nil, {
         manual = true,
         resetTimer = true,
-        force = true,
+        force = options.force ~= false,
     })
 
     if not context then
@@ -54,18 +56,25 @@ local function triggerManualSpike(ply)
         end
         return false
     end
+    if options.quiet or options.skipLocalMessage then
+        return true
+    end
 
     if IsValid(ply) and ply.ChatPrint then
         local subLabel = context.sub and (context.sub.label or context.sub.id) or (context.target or "EPS subsystem")
         local deckText = context.deck and tostring(context.deck) or "?"
         local sectionName = context.sectionName or "Unknown Section"
-        ply:ChatPrint(string.format("[EPS] Forced spike on %s (Deck %s, %s).", subLabel, deckText, sectionName))
+        if options.force ~= false then
+            ply:ChatPrint(string.format("[EPS] Forced spike on %s (Deck %s, %s).", subLabel, deckText, sectionName))
+        else
+            ply:ChatPrint(string.format("[EPS] EPS spike reported at %s (Deck %s, %s).", subLabel, deckText, sectionName))
+        end
     end
 
     return true
 end
 
-local function triggerManualDamage(ply)
+local function triggerManualDamage(ply, options)
     if not deps.startSubsystemDamage then
         if IsValid(ply) and ply.ChatPrint then
             ply:ChatPrint("[EPS] Damage system not available.")
@@ -98,9 +107,15 @@ local function triggerManualDamage(ply)
         deps.rememberPanelForLocation(info.entity, normalized)
     end
 
+    options = options or {}
+
     deps.startSubsystemDamage(normalized, targetSubsystem, 1)
     if deps.scheduleNextSpike then
         deps.scheduleNextSpike()
+    end
+
+    if options.quiet then
+        return true
     end
 
     if IsValid(ply) and ply.ChatPrint then
@@ -108,7 +123,11 @@ local function triggerManualDamage(ply)
         local label = sub and (sub.label or sub.id) or targetSubsystem
         local deckText = info.deck and tostring(info.deck) or "?"
         local sectionName = info.sectionName or "Unknown Section"
-        ply:ChatPrint(string.format("[EPS] Forced overload on %s (Deck %s, %s).", label, deckText, sectionName))
+        if options.force ~= false then
+            ply:ChatPrint(string.format("[EPS] Forced overload on %s (Deck %s, %s).", label, deckText, sectionName))
+        else
+            ply:ChatPrint(string.format("[EPS] EPS overload detected on %s (Deck %s, %s).", label, deckText, sectionName))
+        end
     end
 
     return true
@@ -141,17 +160,31 @@ local function handleChatCommand(ply, text)
         return
     end
 
-    local spikeCfg = EPS.Config.Spikes or {}
-    local forceSpike = spikeCfg.ForceCommand
-    if forceSpike and forceSpike ~= "" and lowered == string.lower(forceSpike) then
-        triggerManualSpike(ply)
+    local naturalSpike = cmdConfig.NaturalSpike
+    if naturalSpike and naturalSpike ~= "" and lowered == string.lower(naturalSpike) then
+        if IsValid(ply) and not deps.isPlayerPrivileged(ply) then return end
+        triggerManualSpike(ply, { force = false, quiet = false, skipLocalMessage = true })
         return ""
     end
 
-    local damageCmd = cmdConfig.Damage or "/epsdamage"
-    if lowered == string.lower(damageCmd) then
+    local forcedSpike = cmdConfig.ForcedSpike or (EPS.Config.Spikes and EPS.Config.Spikes.ForceCommand)
+    if forcedSpike and forcedSpike ~= "" and lowered == string.lower(forcedSpike) then
         if IsValid(ply) and not deps.isPlayerPrivileged(ply) then return end
-        triggerManualDamage(ply)
+        triggerManualSpike(ply, { force = true, quiet = false })
+        return ""
+    end
+
+    local naturalDamage = cmdConfig.NaturalDamage
+    if naturalDamage and naturalDamage ~= "" and lowered == string.lower(naturalDamage) then
+        if IsValid(ply) and not deps.isPlayerPrivileged(ply) then return end
+        triggerManualDamage(ply, { force = false, quiet = false })
+        return ""
+    end
+
+    local forcedDamage = cmdConfig.ForcedDamage or cmdConfig.Damage or "/epsdamage"
+    if forcedDamage and forcedDamage ~= "" and lowered == string.lower(forcedDamage) then
+        if IsValid(ply) and not deps.isPlayerPrivileged(ply) then return end
+        triggerManualDamage(ply, { force = true, quiet = false })
         return ""
     end
 end

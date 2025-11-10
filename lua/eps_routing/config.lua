@@ -91,9 +91,9 @@ EPS.Config = {
 
     -- Optional alert broadcast when a spike begins. Message placeholders: subsystem, deck, section name.
     AlertCommand = "/git",
-    -- Manual override so command staff can kick off a panel-linked spike on demand.
-    ForceCommand = "/pwrspike",
-    AlertMessage = "Power fluctuations detected in %s. Deck %s, %s.",
+    -- Manual overrides (see Commands.Forced... entries below).
+    ForceCommand = "/pwrspike2",
+  AlertMessage = "Power fluctuations detected in %s (Deck %s, %s).",
     AlertRecoveryMessage = "Power allocation stabilized for %s. Deck %s, %s.",
   },
 
@@ -129,5 +129,11 @@ EPS.Config = {
   Commands = {
     Chat = "/eps",
     ConCommand = "eps_open",
+    -- Quiet/manual sabotage commands
+    NaturalSpike = "/pwrspike1",
+    NaturalDamage = "/epsdamage1",
+    -- Explicitly forced/sabotage commands
+    ForcedSpike = "/pwrspike2",
+    ForcedDamage = "/epsdamage2",
   }
 }

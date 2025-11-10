@@ -80,7 +80,7 @@ local function broadcastSpikeAlert(context)
 	local deckText = deck and tostring(deck) or "?"
 	local sectionName = section or "Unknown Section"
 
-	local fallback = "Power fluctuations detected in %s. Deck %s, %s."
+	local fallback = "Power fluctuations detected in %s (Deck %s, %s)."
 	local template = cfg.AlertMessage or fallback
 	local message = safeFormat(template, fallback, subLabel, deckText, sectionName)
 	if message ~= "" then
@@ -119,6 +119,78 @@ local function broadcastRecoveryAlert(context)
 	local message = safeFormat(template, fallback, subLabel, deckText, sectionName)
 	if message ~= "" then
 		announcePanelAlert(panel, message)
+	end
+end
+
+local function announceRecoveryOnce(context)
+	if not context or context.recoveryAnnounced then return end
+	if context.skipRecoveryMessage then
+		context.recoveryAnnounced = true
+		return
+	end
+	context.recoveryAnnounced = true
+	broadcastRecoveryAlert(context)
+end
+
+local function computeBaseline(targetId)
+	if not targetId then return 0 end
+	if EPS.GetSubsystemDefault then
+		local baseline = EPS.GetSubsystemDefault(targetId)
+		if baseline ~= nil then
+			return baseline
+		end
+	end
+
+	local fallback = 0
+	if EPS.IterSubsystems then
+		for _, sub in EPS.IterSubsystems() do
+			if sub.id == targetId then
+				fallback = sub.default or sub.min or 0
+				break
+			end
+		end
+	end
+	return fallback
+end
+
+local function restoreDemandBaseline(context)
+	if not context then return end
+	local targetId = context.target
+	local locKey = context.locKey
+	if not targetId or not locKey then return end
+
+	local baseline = computeBaseline(targetId)
+	if EPS.SetDemand then
+		EPS.SetDemand(locKey, targetId, baseline)
+	end
+	if sendFullState then
+		sendFullState(nil, false)
+	end
+end
+
+local function finalizeSpike(context, opts)
+	if not context or context.finished then return end
+	opts = opts or {}
+
+	if opts.skipMessage then
+		context.skipRecoveryMessage = true
+	end
+
+	context.finished = true
+	context.resolved = true
+
+	if not opts.skipRestore then
+		restoreDemandBaseline(context)
+	end
+
+	announceRecoveryOnce(context)
+
+	if Spikes._current == context then
+		Spikes._current = nil
+	end
+
+	if not opts.skipSchedule then
+		Spikes.ScheduleNext()
 	end
 end
 
@@ -178,8 +250,22 @@ function Spikes.HandleAllocationChange(locKey, changes)
 	local newValue = changes[current.target]
 	if newValue == nil then return end
 
-	if not current.responded and newValue ~= current.startAlloc then
-		current.responded = true
+	local demand = current.targetDemand
+	if demand == nil and EPS.GetDemand then
+		demand = EPS.GetDemand(locKey, current.target)
+	end
+	if demand == nil then
+		demand = current.startAlloc or 0
+	end
+
+	if newValue >= demand then
+		if not current.responded then
+			current.responded = true
+		end
+		current.resolved = true
+		finalizeSpike(current)
+		current.lastAlloc = newValue
+		return
 	end
 	current.lastAlloc = newValue
 end
@@ -191,8 +277,7 @@ function Spikes.Begin(target, panelInfo, opts)
 	opts = opts or {}
 
 	if opts.force and Spikes._current then
-		Spikes._current.responded = true
-		Spikes._current = nil
+		finalizeSpike(Spikes._current, { skipMessage = true })
 	elseif Spikes._current and not opts.allowConcurrent then
 		return nil, "active"
 	end
@@ -314,6 +399,11 @@ function Spikes.Begin(target, panelInfo, opts)
 		expires = CurTime() + duration,
 		manual = opts.manual or false,
 		locKey = locKey,
+		targetDemand = newDemand,
+		recoveryAnnounced = false,
+		finished = false,
+		resolved = false,
+		skipRecoveryMessage = false,
 	}
 
 	Spikes._current = context
@@ -324,29 +414,7 @@ function Spikes.Begin(target, panelInfo, opts)
 
 	timer.Simple(duration, function()
 		if not EPS.State then return end
-
-		local baseline = EPS.GetSubsystemDefault and EPS.GetSubsystemDefault(targetId)
-		if baseline == nil then
-			baseline = 0
-			for _, sub in EPS.IterSubsystems() do
-				if sub.id == targetId then
-					baseline = sub.default or sub.min or 0
-					break
-				end
-			end
-		end
-		EPS.SetDemand(locKey, targetId, baseline)
-		sendFullState(nil, false)
-
-		if Spikes._current == context then
-			if not context.responded then
-				broadcastRecoveryAlert(context)
-			end
-			Spikes._current = nil
-		elseif not context.responded then
-			broadcastRecoveryAlert(context)
-		end
-		Spikes.ScheduleNext()
+		finalizeSpike(context)
 	end)
 
 	return context

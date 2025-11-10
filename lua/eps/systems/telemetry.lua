@@ -214,7 +214,7 @@ function Telemetry.SendTricorderReport(ply, panel, lines)
     EPS._lastTricorderDigest = EPS._lastTricorderDigest or setmetatable({}, { __mode = "k" })
     local digest = table.concat(normalized, "\n")
     local last = EPS._lastTricorderDigest[panel]
-    if last and last.payload == digest and CurTime() - (last.time or 0) < 0.75 then
+    if last and last.payload == digest and CurTime() - (last.time or 0) < 1 then
         return
     end
     EPS._lastTricorderDigest[panel] = { payload = digest, time = CurTime() }
