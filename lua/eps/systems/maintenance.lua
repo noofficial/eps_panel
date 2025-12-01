@@ -106,6 +106,61 @@ local function snapshotAllocations(normalized)
     return saved
 end
 
+local copyMap = Util.CopyMap or function(input)
+    local output = {}
+    if istable(input) then
+        for key, value in pairs(input) do
+            output[key] = value
+        end
+    end
+    return output
+end
+
+local copyList = Util.CopyList or function(values)
+    local result = {}
+    if istable(values) then
+        for _, value in ipairs(values) do
+            result[#result + 1] = value
+        end
+    end
+    return result
+end
+
+local function cloneMapOrNil(source)
+    if not istable(source) then return nil end
+    return copyMap(source)
+end
+
+local function collectPanelSubsystems(info)
+    if not info then return nil end
+    if istable(info.layout) and #info.layout > 0 then
+        return copyList(info.layout)
+    end
+    return nil
+end
+
+local function clampSubsystemSnapshot(snapshot, subset)
+    if not snapshot or not subset or #subset == 0 then return nil end
+    local map = cloneMapOrNil(snapshot)
+    if not map then return nil end
+    for _, id in ipairs(subset) do
+        map[id] = 0
+    end
+    return map
+end
+
+local function mergeSubsetValues(snapshot, subset, saved)
+    if not snapshot or not subset or #subset == 0 or not saved then
+        return snapshot
+    end
+    for _, id in ipairs(subset) do
+        if saved[id] ~= nil then
+            snapshot[id] = saved[id]
+        end
+    end
+    return snapshot
+end
+
 local function applyAllocations(normalized, values)
     if not EPS.IterSubsystems or not EPS.SetAllocation then return false end
     local changed = false
@@ -626,7 +681,7 @@ function Maintenance.HandleSonicDriverOverride(ply, ent)
             end
         end
         Maintenance.SetState(normalized, record, ent)
-        return true
+        return true, false
     end
 
     local now = CurTime()
@@ -672,7 +727,7 @@ function Maintenance.HandleSonicDriverOverride(ply, ent)
 
     if record.overrideResetProgress < SONIC_RESET_REQUIRED_TIME then
         Maintenance.SetState(normalized, record, ent)
-        return true
+        return true, true
     end
 
     record.overrideActive = false
@@ -704,7 +759,7 @@ function Maintenance.HandleSonicDriverOverride(ply, ent)
     if IsValid(ply) and EPS and EPS.BroadcastState then
         EPS.BroadcastState(ply, false)
     end
-    return true
+    return true, false
 end
 
 function Maintenance.TryStartMaintenanceFromScan(ply)
@@ -861,7 +916,18 @@ function Maintenance.ProcessReenergizeContact(ply, ent, info, normalized)
     end)
 
     if record.reenergizeProgress >= record.reenergizeDuration then
+        if IsValid(ent) and ent.HasActiveDamage and ent:HasActiveDamage() then
+            if IsValid(ply) and ply.ChatPrint then
+                ply:ChatPrint("[EPS] Plasma faults detected; clear the sparks with the sonic driver before re-energizing.")
+            end
+            local summary = "Summary: Plasma faults detected; dissipate residual energy with the sonic driver before re-energizing."
+            return false, buildPanelPowerReport(info, normalized, summary, "[Tricorder] EPS Power Diagnostics"), "damage"
+        end
+
         local ok, exitRecord, report = exitMaintenance(ent, ply)
+        if ok and IsValid(ent) and ent.OnMaintenanceRestored then
+            ent:OnMaintenanceRestored(exitRecord)
+        end
         return ok, report, exitRecord
     end
 
@@ -892,8 +958,21 @@ enterMaintenance = function(panel, ply)
     local savedAllocations = snapshotAllocations(normalized)
     local lines, telemetry = buildMaintenanceReportLines(info, normalized, savedDemand)
 
-    applyDemands(normalized, nil)
-    applyAllocations(normalized, nil)
+    local lockedSubsystems = collectPanelSubsystems(info)
+    local demandClamp = clampSubsystemSnapshot(savedDemand, lockedSubsystems)
+    local allocationClamp = clampSubsystemSnapshot(savedAllocations, lockedSubsystems)
+
+    if demandClamp then
+        applyDemands(normalized, demandClamp)
+    else
+        applyDemands(normalized, nil)
+    end
+
+    if allocationClamp then
+        applyAllocations(normalized, allocationClamp)
+    else
+        applyAllocations(normalized, nil)
+    end
 
     local record = existing or {}
     record.active = true
@@ -903,6 +982,7 @@ enterMaintenance = function(panel, ply)
     record.rawLocationKey = locKey
     record.savedDemand = savedDemand
     record.savedAllocations = savedAllocations
+    record.lockedSubsystems = lockedSubsystems and #lockedSubsystems > 0 and lockedSubsystems or nil
     record.telemetry = telemetry or record.telemetry
     record.enteredAt = CurTime()
     record.operator = IsValid(ply) and ply or record.operator
@@ -920,7 +1000,6 @@ enterMaintenance = function(panel, ply)
     timer.Remove(buildTimerName("EPS_ReenergizeDecay", normalized))
 
     Maintenance.SetState(normalized, record, panel)
-    Maintenance.SetState(normalized, record)
 
     if IsValid(panel) then
         panel:SetNWBool("eps_maintenance_lock", true)
@@ -970,11 +1049,26 @@ exitMaintenance = function(panel, ply)
     resetReenergizeState(record)
 
     if record.savedDemand then
-        applyDemands(normalized, record.savedDemand)
+        if record.lockedSubsystems and #record.lockedSubsystems > 0 then
+            local restoreDemand = snapshotDemand(normalized)
+            restoreDemand = mergeSubsetValues(restoreDemand, record.lockedSubsystems, record.savedDemand)
+            applyDemands(normalized, restoreDemand)
+        else
+            applyDemands(normalized, record.savedDemand)
+        end
+    end
+
+    if record.savedAllocations then
+        if record.lockedSubsystems and #record.lockedSubsystems > 0 then
+            local restoreAlloc = snapshotAllocations(normalized)
+            restoreAlloc = mergeSubsetValues(restoreAlloc, record.lockedSubsystems, record.savedAllocations)
+            applyAllocations(normalized, restoreAlloc)
+        else
+            applyAllocations(normalized, record.savedAllocations)
+        end
     end
 
     Maintenance.SetState(normalized, nil, panel)
-    Maintenance.SetState(normalized, nil)
 
     if IsValid(panel) then
         panel:SetNWBool("eps_maintenance_lock", false)

@@ -75,11 +75,10 @@ local function normalizeSection(sectionName)
     return str
 end
 
-function EPS.NormalizeLocationKey(deck, sectionName, sectionId, panelId)
+function EPS.NormalizeLocationKey(deck, sectionName, sectionId)
     local deckStr = deck and tostring(deck) or "?"
     local sectionStr = normalizeSection(sectionName)
     local idStr = sectionId ~= nil and tostring(sectionId) or ""
-    local panelStr = panelId ~= nil and tostring(panelId) or ""
 
     local parts = { deckStr }
 
@@ -89,11 +88,6 @@ function EPS.NormalizeLocationKey(deck, sectionName, sectionId, panelId)
 
     local sectionSegment = sectionStr ~= "" and sectionStr or "unknown"
     parts[#parts + 1] = sectionSegment
-
-    if panelStr ~= "" then
-        parts[#parts + 1] = "panel"
-        parts[#parts + 1] = panelStr
-    end
 
     return table.concat(parts, "::")
 end

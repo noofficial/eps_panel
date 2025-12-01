@@ -44,13 +44,24 @@ end
 local function onSonicDriver(ply, swep, ent, hitPos)
     if not IsValid(ent) or ent:GetClass() ~= "ent_eps_panel" then return end
     local handled = false
+    local continue = false
     if deps.handleSonicOverride then
-        handled = deps.handleSonicOverride(ply, ent) or handled
+        local ok, wantContinue = deps.handleSonicOverride(ply, ent)
+        if ok then
+            handled = true
+            continue = continue or wantContinue == true
+        end
     end
     if ent.HandleSonicRepair then
-        handled = ent:HandleSonicRepair(ply, swep, hitPos) or handled
+        local ok, wantContinue = ent:HandleSonicRepair(ply, swep, hitPos)
+        if ok then
+            handled = true
+            continue = continue or wantContinue == true
+        end
     end
-    return handled
+    if handled then
+        return true, continue
+    end
 end
 
 local function isHoldingODNScanner(ply)
@@ -87,23 +98,28 @@ local function onHyperspanner(ply, swep, ent, hitPos)
         ok, report, status = deps.processReenergize(ply, ent, info, normalized)
     end
 
+    local handled = false
+    local continue = false
+
     if ok then
         reportToTricorder(ply, ent, report)
-        return true
-    end
-
-    if report then
+        handled = true
+        continue = false
+    elseif report then
         reportToTricorder(ply, ent, report)
-        return true
+        handled = true
+        continue = status == "progress"
+    elseif status == "progress" then
+        handled = true
+        continue = true
+    else
+        local fallback = buildPowerReport(info, normalized, "Summary: EPS manifold already reading within nominal tolerances.", "[Tricorder] EPS Power Diagnostics")
+        reportToTricorder(ply, ent, fallback)
+        handled = true
+        continue = false
     end
 
-    if status == "progress" then
-        return true
-    end
-
-    local fallback = buildPowerReport(info, normalized, "Summary: EPS manifold already reading within nominal tolerances.", "[Tricorder] EPS Power Diagnostics")
-    reportToTricorder(ply, ent, fallback)
-    return true
+    return true, continue
 end
 
 local function onScanEntity(ent, scanData)

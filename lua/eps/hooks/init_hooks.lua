@@ -48,6 +48,13 @@ local function setupSpikes(modules)
     })
 end
 
+local function setupDeflectors(modules)
+    local Deflectors = modules.Deflectors
+    if not Deflectors or not Deflectors.Setup then return end
+
+    Deflectors.Setup()
+end
+
 local function setupCommands(modules)
     local Commands = modules.Commands
     local Spikes = modules.Spikes
@@ -134,6 +141,7 @@ function Hooks.RegisterAll(modules)
     setupAllocations(modules, utilLib)
     setupRoutingNet(modules)
     setupSpikes(modules)
+    setupDeflectors(modules)
     setupCommands(modules)
     setupMaintenanceInteractions(modules, utilLib)
     setupPlayerInteractions(modules)

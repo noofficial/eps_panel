@@ -9,6 +9,57 @@ local DEFAULT_MODEL = "models/props/engineering/engineering_wallprop_01.mdl"
 local USE_COOLDOWN = 1.0 -- seconds between legit uses; keeps the spam-clickers honest
 local SCANNER_UPDATE_INTERVAL = 5
 local SCANNER_MAINTENANCE_HINT_DURATION = 120
+local PANEL_MAX_HEALTH = 200
+local DAMAGE_SPARK_CHANCE = 0.35
+
+local function resolveNormalizedLocation(locKey)
+    if EPS.GetLocationState then
+        local _, normalized = EPS.GetLocationState(locKey)
+        if normalized then
+            return normalized
+        end
+    end
+    return normalizeLocKey(locKey)
+end
+
+local function drainAllAllocations(locKey)
+    if not EPS.IterSubsystems or not EPS.SetAllocation then return end
+    local normalized = resolveNormalizedLocation(locKey)
+    local changed = false
+    for _, sub in EPS.IterSubsystems() do
+        local id = sub and sub.id
+        if id then
+            local current = EPS.GetAllocation and EPS.GetAllocation(normalized, id) or 0
+            if current ~= 0 then
+                EPS.SetAllocation(normalized, id, 0)
+                changed = true
+            end
+        end
+    end
+    if changed and EPS._RunChangeHookIfNeeded then
+        EPS._RunChangeHookIfNeeded(normalized)
+    end
+end
+
+local function collectDamageTargets(info)
+    local targets = {}
+    local layout = info and info.layout or {}
+    local shakeConfig = EPS.Config and EPS.Config.DamageShake or {}
+    if istable(layout) then
+        for _, id in ipairs(layout) do
+            if shakeConfig[id] then
+                targets[#targets + 1] = id
+            end
+        end
+    end
+    if #targets == 0 and istable(layout) and #layout > 0 then
+        targets[1] = layout[1]
+    end
+    if #targets == 0 then
+        targets[1] = "auxiliary_power"
+    end
+    return targets
+end
 
 local function normalizeLocKey(locKey)
     if not isstring(locKey) then return "global" end
@@ -79,6 +130,10 @@ function ENT:Initialize()
     if IsValid(phys) then phys:Wake() end
 
     self:SetUseType(SIMPLE_USE)
+    self:SetMaxHealth(PANEL_MAX_HEALTH)
+    self:SetHealth(PANEL_MAX_HEALTH)
+    self._epsPanelDestroyed = false
+    self:SetNWBool("eps_panel_offline", false)
     self._nextUse = 0 -- remember the last E press so we can throttle a bit
     self._epsDamage = nil
     self._nextScannerUpdate = 0
@@ -291,21 +346,131 @@ function ENT:GetActiveDamageState()
     end
 end
 
+function ENT:HasActiveDamage()
+    return self:GetActiveDamageState() ~= nil
+end
+
 function ENT:HandleSonicRepair(ply, swep, hitPos)
     local state = self:GetActiveDamageState()
-    if not state or state.repaired then return false end
+    local handled = false
+    local continue = false
 
-    local repairTime = state.repairTime or 0
-    if repairTime <= 0 then return false end
-
-    state.progress = math.min((state.progress or 0) + FrameTime(), repairTime)
-    state.lastRepair = CurTime()
-
-    if state.progress >= repairTime and EPS and EPS._CompleteDamageRepair then
-        EPS._CompleteDamageRepair(state, ply)
+    if state and not state.repaired then
+        local repairTime = state.repairTime or 0
+        if repairTime > 0 then
+            state.progress = math.min((state.progress or 0) + FrameTime(), repairTime)
+            state.lastRepair = CurTime()
+            handled = true
+            local completed = state.progress >= repairTime
+            if completed and EPS and EPS._CompleteDamageRepair then
+                EPS._CompleteDamageRepair(state, ply)
+            else
+                continue = true
+            end
+        end
     end
 
-    return true
+    if not self._epsPanelDestroyed then
+        local maxHP = self:GetMaxHealth() or PANEL_MAX_HEALTH
+        local current = self:Health() or maxHP
+        if current < maxHP then
+            self._sonicHealProgress = (self._sonicHealProgress or 0) + FrameTime()
+            local interval = 0.2
+            if self._sonicHealProgress >= interval then
+                self._sonicHealProgress = self._sonicHealProgress - interval
+                local delta = math.max(1, math.floor(maxHP * 0.02))
+                local newHP = math.min(maxHP, current + delta)
+                self:SetHealth(newHP)
+                if newHP >= maxHP then
+                    self._sonicHealProgress = 0
+                end
+            end
+            handled = true
+            if (self:Health() or maxHP) < maxHP then
+                continue = true
+            end
+        else
+            self._sonicHealProgress = 0
+        end
+    end
+
+    return handled, continue
+end
+
+function ENT:ResetPanelIntegrity()
+    self._epsPanelDestroyed = false
+    self:SetNWBool("eps_panel_offline", false)
+    self:SetHealth(self:GetMaxHealth() or PANEL_MAX_HEALTH)
+    self._lastDamageSource = nil
+end
+
+function ENT:OnMaintenanceRestored(record)
+    if not self._epsPanelDestroyed then return end
+    self:ResetPanelIntegrity()
+end
+
+function ENT:StartDamageCascade(info, normalized)
+    if not EPS.StartSubsystemDamage then return end
+    local targets = collectDamageTargets(info)
+    for _, id in ipairs(targets) do
+        EPS.StartSubsystemDamage(normalized, id, 1)
+    end
+end
+
+function ENT:HandlePanelBreach(dmgInfo)
+    if self._epsPanelDestroyed then return end
+    self._epsPanelDestroyed = true
+    self:SetNWBool("eps_panel_offline", true)
+
+    local function triggerExplosion()
+        local effect = EffectData()
+        effect:SetOrigin(self:WorldSpaceCenter())
+        util.Effect("Explosion", effect, true, true)
+
+        util.BlastDamage(self, IsValid(dmgInfo) and dmgInfo:GetAttacker() or self, self:GetPos(), 180, 45)
+    end
+
+    local attacker = (dmgInfo and dmgInfo.GetAttacker and dmgInfo:GetAttacker()) or nil
+    if IsValid(attacker) then
+        self._lastDamageSource = attacker
+    end
+
+    local info = resolvePanelInfo(self)
+    local locKey = info and (info.locationKeyLower or info.locationKey) or "global"
+    local normalized = resolveNormalizedLocation(locKey)
+
+    if EPS.EnterMaintenance then
+        local alreadyLocked = EPS.IsLocationMaintenanceLocked and EPS.IsLocationMaintenanceLocked(locKey, self)
+        if not alreadyLocked then
+            local operator = IsValid(attacker) and attacker:IsPlayer() and attacker or nil
+            EPS.EnterMaintenance(self, operator)
+        end
+    end
+
+    drainAllAllocations(locKey)
+    self:TriggerOverpowerSparks()
+    triggerExplosion()
+    util.ScreenShake(self:GetPos(), 2, 2, 0.35, 700)
+    self:StartDamageCascade(info, normalized)
+end
+
+function ENT:OnTakeDamage(dmgInfo)
+    self:TakePhysicsDamage(dmgInfo)
+    if self._epsPanelDestroyed then return end
+    local damage = (dmgInfo and dmgInfo.GetDamage and dmgInfo:GetDamage()) or 0
+    damage = math.max(damage, 0)
+    if damage <= 0 then return end
+
+    local newHealth = math.max((self:Health() or PANEL_MAX_HEALTH) - damage, 0)
+    self:SetHealth(newHealth)
+
+    if newHealth > 0 and math.random() < DAMAGE_SPARK_CHANCE then
+        self:TriggerOverpowerSparks()
+    end
+
+    if newHealth <= 0 then
+        self:HandlePanelBreach(dmgInfo)
+    end
 end
 
 local function jitterMetric(ent, tag, base, variance)

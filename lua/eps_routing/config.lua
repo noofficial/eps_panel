@@ -6,19 +6,22 @@ EPS.Config = {
   -- Fire effect offset; set to nil to fall back to spark offset + 24.
   PanelFireOffset = { x = 6, y = 0, z = 50 },
 
-  -- Full ship-wide EPS capacity. Sized just above the combined subsystem peaks so we stay flexible when things spike.
-  MaxBudget = 860,
+  -- Full ship-wide EPS capacity. Sized for ~120 units of maneuvering room over the 802-unit baseline, forcing trade-offs before every slider hits max.
+  MaxBudget = 920,
 
   -- Sliders shown in the UI. These represent the full EPS subsystem library; consoles will
   -- pick a subset depending on where they are on the ship. Defaults sit at roughly eighty percent of the spike cap.
   Subsystems = {
-  { id = "life_support",              label = "Life Support",                   min = 0, max =  60, overdrive =  72, default = 48 },
-  { id = "replicators.general",       label = "Replicators",                    min = 0, max =  28, overdrive =  34, default = 22 },
+  { id = "life_support",              label = "Life Support",                   min = 0, max =  72, overdrive =  86, default = 58 },
+  { id = "gravity",                   label = "Gravity Control",                min = 0, max =  36, overdrive =  44, default = 28 },
+  { id = "replicators.general",       label = "Replicators",                    min = 0, max =  36, overdrive =  44, default = 29 },
   { id = "replicators.industrial",    label = "Industrial Replicators",         min = 0, max =  26, overdrive =  31, default = 21 },
-  { id = "forcefields",               label = "Forcefields",                    min = 0, max =  32, overdrive =  38, default = 26 },
+  { id = "forcefields",               label = "Forcefields",                    min = 0, max =  40, overdrive =  50, default = 32 },
   { id = "helm_control",              label = "Helm Control",                   min = 0, max =  25, overdrive =  30, default = 20 },
   { id = "communications",            label = "Communications",                 min = 0, max =  22, overdrive =  26, default = 18 },
   { id = "shields",                   label = "Deflector Shields",              min = 0, max =  55, overdrive =  66, default = 44 },
+  { id = "main_deflector",            label = "Main Deflector",                 min = 0, max =  60, overdrive =  72, default = 48 },
+  { id = "secondary_deflector",       label = "Secondary Deflector",            min = 0, max =  42, overdrive =  50, default = 34 },
   { id = "weapons",                   label = "Tactical Weapon Systems",        min = 0, max =  50, overdrive =  60, default = 40 },
   { id = "sensors",                   label = "Long-Range Sensors",             min = 0, max =  36, overdrive =  43, default = 29 },
   { id = "impulse_engines",           label = "Impulse Engines",                min = 0, max =  52, overdrive =  62, default = 42 },
@@ -33,7 +36,7 @@ EPS.Config = {
   { id = "cargo_transporters",        label = "Cargo Transporters",             min = 0, max =  30, overdrive =  36, default = 24 },
   { id = "matter_antimatter_flow",    label = "Matter/Antimatter Flow Reg.",    min = 0, max =  64, overdrive =  77, default = 51 },
   { id = "slipstream_drive",          label = "Slipstream Drive",               min = 0, max =  82, overdrive =  98, default = 66 },
-  { id = "auxiliary_power",           label = "Auxiliary Power Matrix",         min = 0, max = 140, overdrive = 180, default = 112 },
+  { id = "auxiliary_power",           label = "Auxiliary Power Matrix",         min = 0, max = 160, overdrive = 200, default = 128 },
   { id = "sickbay_lab",               label = "Sickbay Lab Systems",            min = 0, max =  26, overdrive =  31, default = 21 },
   { id = "medical_scanner",           label = "Medical Diagnostic Scanners",    min = 0, max =  22, overdrive =  26, default = 18 },
   { id = "biofilters",                label = "Biofilters & Sterilization",     min = 0, max =  24, overdrive =  29, default = 19 }
@@ -63,7 +66,10 @@ EPS.Config = {
       forcefields = 3,
       helm_control = 2,
       communications = 2,
+      gravity = 3,
       shields = 4,
+      main_deflector = 3,
+      secondary_deflector = 2,
       weapons = 4,
       sensors = 3,
       impulse_engines = 3,
@@ -99,7 +105,7 @@ EPS.Config = {
 
   DynamicLayouts = {
     default = { "replicators.general", "forcefields", "auxiliary_power" },
-    alwaysInclude = { "life_support", "auxiliary_power" },
+    alwaysInclude = { "auxiliary_power" },
 
     deckOverrides = {
       [3] = { "replicators.general" },
@@ -121,8 +127,110 @@ EPS.Config = {
       ["Section 3 Holodeck 1"] = { "holoemitters", "holodeck_safety", "replicators.general" },
       ["Section 4 Holodeck 2"] = { "holoemitters", "holodeck_safety", "replicators.general" },
       ["Section 7 Cargobay 7"] = { "replicators.industrial", "cargo_transporters", "forcefields" },
-      ["Section 4 Engineering"] = { "matter_antimatter_flow", "impulse_engines", "slipstream_drive", "auxiliary_power", "replicators.general", "forcefields" }
+      ["Section 4 Engineering"] = { "matter_antimatter_flow", "impulse_engines", "slipstream_drive", "auxiliary_power", "replicators.general", "forcefields", "main_deflector", "secondary_deflector", "life_support", "communications", "gravity" }
     }
+  },
+
+  DamageShake = {
+    helm_control = {
+      amplitude = { min = 0.3, max = 1.5 },
+      frequency = { min = 0.3, max = 1.5 },
+      duration = { min = 10.0, max = 0.5 },
+      radius = 700,
+    },
+    life_support = {
+      amplitude = { min = 0.3, max = 1.5 },
+      frequency = { min = 0.3, max = 1.5 },
+      duration = { min = 10.0, max = 0.5 },
+      radius = 700,
+    },
+    gravity = {
+      amplitude = { min = 0.3, max = 1.5 },
+      frequency = { min = 0.3, max = 1.5 },
+      duration = { min = 10.0, max = 0.5 },
+      radius = 700,
+    },
+    communications = {
+      amplitude = { min = 0.3, max = 1.5 },
+      frequency = { min = 0.3, max = 1.5 },
+      duration = { min = 10.0, max = 0.5 },
+      radius = 700,
+    },
+    main_deflector = {
+      amplitude = { min = 0.3, max = 1.5 },
+      frequency = { min = 0.3, max = 1.5 },
+      duration = { min = 10.0, max = 0.5 },
+      radius = 700,
+    },
+    secondary_deflector = {
+      amplitude = { min = 0.3, max = 1.5 },
+      frequency = { min = 0.3, max = 1.5 },
+      duration = { min = 10.0, max = 0.5 },
+      radius = 700,
+    },
+    weapons = {
+      amplitude = { min = 0.3, max = 1.5 },
+      frequency = { min = 0.3, max = 1.5 },
+      duration = { min = 10.0, max = 0.5 },
+      radius = 700,
+    },
+    impulse_engines = {
+      amplitude = { min = 0.3, max = 1.5 },
+      frequency = { min = 0.3, max = 1.5 },
+      duration = { min = 10.0, max = 0.5 },
+      radius = 700,
+    },
+    matter_antimatter_flow = {
+      amplitude = { min = 0.3, max = 1.5 },
+      frequency = { min = 0.3, max = 1.5 },
+      duration = { min = 10.0, max = 0.5 },
+      radius = 700,
+    },
+    slipstream_drive = {
+      amplitude = { min = 0.3, max = 1.5 },
+      frequency = { min = 0.3, max = 1.5 },
+      duration = { min = 10.0, max = 0.5 },
+      radius = 700,
+    },
+  },
+  RestrictedSubsystems = {
+    life_support = {
+      sections = { "Section 4 Engineering" },
+    },
+    communications = {
+      sections = { "Section 4 Engineering" },
+    },
+    gravity = {
+      sections = { "Section 4 Engineering" },
+    },
+  },
+
+  CriticalSystems = {
+    life_support = {
+      fireOffset = { x = 0, y = 0, z = 64 },
+      damageRate = 0.0125,
+    },
+    communications = {
+      fireOffset = { x = 0, y = 0, z = 42 },
+      damageRate = 0.02,
+    },
+    gravity = {
+      fireOffset = { x = 0, y = 0, z = 72 },
+      damageRate = 0.018,
+    },
+  },
+
+  Deflectors = {
+    main = {
+      subsystem = "main_deflector",
+      label = "Main Deflector",
+      threshold = 0,
+    },
+    secondary = {
+      subsystem = "secondary_deflector",
+      label = "Secondary Deflector",
+      threshold = 0,
+    },
   },
 
   -- Open the UI via chat or console.

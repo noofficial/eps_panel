@@ -60,6 +60,64 @@ function Layout.NormalizeSectionKey(key)
     return string.Trim(string.lower(key))
 end
 
+local function getRestrictedSubsystems()
+    return EPS.Config and EPS.Config.RestrictedSubsystems or nil
+end
+
+local function deckMatches(ruleDecks, deck)
+    if not istable(ruleDecks) or #ruleDecks == 0 then
+        return true
+    end
+    local deckNumber = tonumber(deck)
+    for _, entry in ipairs(ruleDecks) do
+        if tonumber(entry) == deckNumber then
+            return true
+        end
+    end
+    return false
+end
+
+local function sectionMatches(ruleSections, sectionName)
+    if not istable(ruleSections) or #ruleSections == 0 then
+        return true
+    end
+    local normalized = Layout.NormalizeSectionKey(sectionName)
+    for _, entry in ipairs(ruleSections) do
+        if Layout.NormalizeSectionKey(entry) == normalized then
+            return true
+        end
+    end
+    return false
+end
+
+local function isSubsystemAllowed(id, deck, sectionName)
+    local restricted = getRestrictedSubsystems()
+    if not restricted then return true end
+    local rule = restricted[id]
+    if not rule then return true end
+    if not deckMatches(rule.decks, deck) then
+        return false
+    end
+    if not sectionMatches(rule.sections, sectionName) then
+        return false
+    end
+    return true
+end
+
+local function applyRestrictions(layout, deck, sectionName)
+    local restricted = getRestrictedSubsystems()
+    if not restricted or not istable(layout) then
+        return layout
+    end
+    local filtered = {}
+    for _, id in ipairs(layout) do
+        if isSubsystemAllowed(id, deck, sectionName) then
+            filtered[#filtered + 1] = id
+        end
+    end
+    return filtered
+end
+
 function Layout.DetermineSectionForPos(pos)
     if not pos then return end
     if not Star_Trek or not Star_Trek.Sections or not Star_Trek.Sections.DetermineSection then return end
@@ -121,6 +179,7 @@ function Layout.BuildLayoutFor(deck, sectionName)
     end
 
     local sanitized = Layout.SanitizeLayout(layout, usedDefault)
+    sanitized = applyRestrictions(sanitized, deck, sectionName)
     return sanitized, { source = chosenSource, deck = deck, section = sectionName }
 end
 
